@@ -1,6 +1,6 @@
 import os
 import shutil
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Tuple, Dict
 
 from .config import Config
 from .modlist import read_modlist
@@ -179,8 +179,8 @@ def select_latest_per_prefix(jar_paths: Iterable[str]) -> List[str]:
     return selected
 
 
-def scan_existing_versions(mods_dir: str) -> dict[str, str]:
-    versions: dict[str, str] = {}
+def scan_existing_versions(mods_dir: str) -> Dict[str, str]:
+    versions: Dict[str, str] = {}
     if not os.path.isdir(mods_dir):
         return versions
     for fn in os.listdir(mods_dir):
@@ -189,6 +189,22 @@ def scan_existing_versions(mods_dir: str) -> dict[str, str]:
         prefix = _extract_prefix(fn)
         versions[prefix] = _parse_version_from_filename(fn)
     return versions
+
+
+def existing_jars_by_prefix(mods_dir: str) -> Dict[str, List[str]]:
+    groups: Dict[str, List[str]] = {}
+    if not os.path.isdir(mods_dir):
+        return groups
+    for fn in os.listdir(mods_dir):
+        if not fn.lower().endswith('.jar'):
+            continue
+        p = os.path.join(mods_dir, fn)
+        prefix = _extract_prefix(fn)
+        groups.setdefault(prefix, []).append(p)
+    # sort newest first
+    for k, lst in groups.items():
+        lst.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return groups
 
 
 def run_update(cfg: Config) -> int:
@@ -232,13 +248,13 @@ def run_update(cfg: Config) -> int:
     # Decide which JAR to copy per mod prefix (latest only)
     selected_jars = select_latest_per_prefix(jars)
 
-    # Inspect current versions before clearing to report updates
+    # Inspect current versions and existing files by prefix
     existing_versions = scan_existing_versions(cfg.mods_dir)
+    existing_groups = existing_jars_by_prefix(cfg.mods_dir)
 
-    clear_old_jars(cfg.mods_dir)
-    copied = copy_jars_to_mods(cfg.mods_dir, selected_jars)
+    copied: List[str] = []
 
-    # Report per-mod version status
+    # Report per-mod version status and copy only when needed
     try:
         import colorama
         from colorama import Fore, Style
@@ -256,12 +272,23 @@ def run_update(cfg: Config) -> int:
         old_ver = existing_versions.get(prefix)
         if old_ver and old_ver != new_ver:
             print(Fore.YELLOW + f"Updated {prefix} {old_ver} -> {new_ver}")
+            # remove existing files for this prefix, then copy new
+            for old_path in existing_groups.get(prefix, []):
+                try:
+                    os.remove(old_path)
+                except Exception as e:
+                    print(f"Failed to remove older version: {old_path} - {e}")
+            copied += copy_jars_to_mods(cfg.mods_dir, [jar])
             updates += 1
-        else:
-            # show found version in light green with explicit status
+        elif old_ver and old_ver == new_ver:
             print(Fore.LIGHTGREEN_EX + f"{prefix} {new_ver} already up to date")
+            # nothing to do
+        else:
+            # not installed yet
+            print(Fore.CYAN + f"Installing {prefix} {new_ver}")
+            copied += copy_jars_to_mods(cfg.mods_dir, [jar])
 
-    # Secondary cleanup to prevent duplicates of same mod with versioned filenames (safety)
+    # Safety cleanup to prevent duplicates of same mod with versioned filenames
     removed = cleanup_duplicate_versions(cfg.mods_dir)
     print(f"Copied: {len(copied)} jars")
     if removed:
