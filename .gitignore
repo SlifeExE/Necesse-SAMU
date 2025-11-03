@@ -1,0 +1,26 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.mypy_cache/
+.pytest_cache/
+
+# Virtual environments / env files
+.env
+.venv/
+venv/
+
+# Build artifacts (PyInstaller)
+build/
+dist/
+*.spec
+
+# Generated icon (built from icon.png by build script)
+icon.ico
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

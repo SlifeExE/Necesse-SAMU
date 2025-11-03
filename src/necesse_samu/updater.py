@@ -155,6 +155,42 @@ def cleanup_duplicate_versions(mods_dir: str) -> List[str]:
     return removed
 
 
+def _parse_version_from_filename(filename: str) -> str:
+    base = os.path.basename(filename)
+    if base.lower().endswith('.jar'):
+        base = base[:-4]
+    if '-' in base:
+        return base.split('-', 1)[1]
+    return ""
+
+
+def select_latest_per_prefix(jar_paths: Iterable[str]) -> List[str]:
+    groups: dict[str, List[str]] = {}
+    for p in jar_paths:
+        prefix = _extract_prefix(os.path.basename(p))
+        groups.setdefault(prefix, []).append(p)
+    selected: List[str] = []
+    for prefix, files in groups.items():
+        if len(files) == 1:
+            selected.append(files[0])
+        else:
+            files_sorted = sorted(files, key=lambda p: os.path.getmtime(p), reverse=True)
+            selected.append(files_sorted[0])
+    return selected
+
+
+def scan_existing_versions(mods_dir: str) -> dict[str, str]:
+    versions: dict[str, str] = {}
+    if not os.path.isdir(mods_dir):
+        return versions
+    for fn in os.listdir(mods_dir):
+        if not fn.lower().endswith('.jar'):
+            continue
+        prefix = _extract_prefix(fn)
+        versions[prefix] = _parse_version_from_filename(fn)
+    return versions
+
+
 def run_update(cfg: Config) -> int:
     print(f"Mods directory: {cfg.mods_dir}")
     print(f"SteamCMD: {cfg.steamcmd_path}")
@@ -193,9 +229,39 @@ def run_update(cfg: Config) -> int:
         print(f"Checked: {alt_base}")
         return 2
 
+    # Decide which JAR to copy per mod prefix (latest only)
+    selected_jars = select_latest_per_prefix(jars)
+
+    # Inspect current versions before clearing to report updates
+    existing_versions = scan_existing_versions(cfg.mods_dir)
+
     clear_old_jars(cfg.mods_dir)
-    copied = copy_jars_to_mods(cfg.mods_dir, jars)
-    # Secondary cleanup to prevent duplicates of same mod with versioned filenames
+    copied = copy_jars_to_mods(cfg.mods_dir, selected_jars)
+
+    # Report per-mod version status
+    try:
+        import colorama
+        from colorama import Fore, Style
+        colorama.init(autoreset=True)
+    except Exception:
+        class Fore:  # type: ignore
+            LIGHTGREEN_EX = GREEN = YELLOW = CYAN = RED = ""
+        class Style:  # type: ignore
+            BRIGHT = NORMAL = ""
+
+    updates = 0
+    for jar in selected_jars:
+        prefix = _extract_prefix(os.path.basename(jar))
+        new_ver = _parse_version_from_filename(jar) or "?"
+        old_ver = existing_versions.get(prefix)
+        if old_ver and old_ver != new_ver:
+            print(Fore.YELLOW + f"Updated {prefix} {old_ver} -> {new_ver}")
+            updates += 1
+        else:
+            # show found version in light green with explicit status
+            print(Fore.LIGHTGREEN_EX + f"{prefix} {new_ver} already up to date")
+
+    # Secondary cleanup to prevent duplicates of same mod with versioned filenames (safety)
     removed = cleanup_duplicate_versions(cfg.mods_dir)
     print(f"Copied: {len(copied)} jars")
     if removed:

@@ -20,6 +20,7 @@ class Config:
     workshop_content_dir: Optional[str] = None
     steam_web_api_key: Optional[str] = None
     mod_id_overrides: Optional[Dict[str, str]] = None
+    pause_on_exit: bool = True
 
     @property
     def steamcmd_dir(self) -> str:
@@ -79,4 +80,5 @@ def load_config(path: Optional[str] = None) -> Config:
         workshop_content_dir=os.path.expandvars(os.path.expanduser(data.get("workshop_content_dir"))) if data.get("workshop_content_dir") else None,
         steam_web_api_key=data.get("steam_web_api_key"),
         mod_id_overrides=data.get("mod_id_overrides", {}),
+        pause_on_exit=bool(data.get("pause_on_exit", True)),
     )
